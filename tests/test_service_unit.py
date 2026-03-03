@@ -45,4 +45,17 @@ def test_delete_student_invalid_id():
     with pytest.raises(ValueError, match="student_id must be > 0"):
         service.delete_student(0)
 
+def test_list_students_returns_one_student():
+    repo = Mock()
+    repo.get_all.return_value = [
+        {"id": 1, "name": "Dominik", "email": "dominik@example.com"}
+    ]
 
+    service = StudentService(repo)
+
+    students = service.list_students()
+
+    repo.get_all.assert_called_once()
+    assert len(students) == 1
+    assert students[0]["name"] == "Dominik"
+    assert students[0]["email"] == "dominik@example.com"
