@@ -1,28 +1,54 @@
 import pytest
-from app import cli
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-@pytest.fixture
-def mock_db_and_input(monkeypatch):
-    monkeypatch.setattr("app.cli.DB_URL", "sqlite:///:memory:")
+from app.db import Base
+from app.repository import StudentRepository
+from app.service import StudentService
 
-def test_component_full_app_lifecycle(monkeypatch, capsys):
-    inputs = [
-        "1", "Alice", "alice@example.com",
-        "2",
-        "3", "1", "Alice Smith", "alice.smith@example.com",
-        "4", "1",
-        "5"
-    ]
+@pytest.fixture(scope="function")
+def service_component():
+
+    engine = create_engine("sqlite:///:memory:", echo=False, future=True)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = Session()
     
-    monkeypatch.setattr("builtins.input", lambda _: inputs.pop(0))
+    repo = StudentRepository(session)
+    service = StudentService(repo)
     
-    cli.main()
+    yield service
     
-    captured = capsys.readouterr()
-    output = captured.out
+    session.close()
+    Base.metadata.drop_all(engine)
+
+def test_component_service_create_and_list_lifecycle(service_component):
+
+    service_component.create_student("Alice Cooper", "alice@example.com")
+    service_component.create_student("Bob Builder", "bob@example.com")
     
-    assert "Created: Student(id=1, name='Alice', email='alice@example.com')" in output
-    assert "Student(id=1, name='Alice', email='alice@example.com')" in output
-    assert "Updated: Student(id=1, name='Alice Smith', email='alice.smith@example.com')" in output
-    assert "Deleted." in output
-    assert "Bye." in output
+    students = service_component.list_students()
+    
+    assert len(students) == 2
+    assert any(s.name == "Alice Cooper" for s in students)
+    assert any(s.email == "bob@example.com" for s in students)
+
+def test_component_service_business_validations(service_component):
+
+    with pytest.raises(ValueError, match="Name must have at least 2 characters."):
+        service_component.create_student("A", "a@example.com")
+    
+    with pytest.raises(ValueError, match="Invalid email address."):
+        service_component.create_student("John", "bad-email")
+
+def test_component_service_delete_flow(service_component):
+
+    student = service_component.create_student("To Be Deleted", "delete@example.com")
+    
+    service_component.delete_student(student.id)
+    
+    students = service_component.list_students()
+    assert len(students) == 0
+    
+    with pytest.raises(ValueError, match="Student not found."):
+        service_component.delete_student(student.id)
